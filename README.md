@@ -18,6 +18,7 @@ A minimal, console-only vibration measurement system for Raspberry Pi with two b
 - **State Machine:** Simple two-state system (IDLE and MEASURING)
 
 - **Console Output:** All vibration readings printed to console at 1-second intervals while measuring
+- **CSV Export:** Measurements are saved to `measurements.csv` after shutdown
 
 ## Project Structure
 
@@ -153,6 +154,7 @@ Hold POWER button for 2+ seconds to shutdown.
 - All GPIO pins are configurable in `config.py`
 - Sensor reading interval is configurable (default: 1.0 second)
 - LED blink interval is configurable (default: 0.5 seconds)
+- CSV output filename is configurable in `config.py`
 - The system gracefully handles missing sensors with simulated data
 - Button debouncing is implemented to prevent false triggers
 - LEDs require 220Ω current-limiting resistors in series

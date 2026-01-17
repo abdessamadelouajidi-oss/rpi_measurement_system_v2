@@ -14,3 +14,6 @@ MEASURING_LED_BLINK_INTERVAL = 0.5  # Blink every 0.5 seconds
 
 # Measurement settings
 READING_INTERVAL = 1.0  # Read vibration every 1.0 second while measuring
+
+# CSV output
+CSV_OUTPUT_PATH = "measurements.csv"  # Saved after shutdown

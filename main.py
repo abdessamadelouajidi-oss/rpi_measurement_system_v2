@@ -2,6 +2,7 @@
 
 import time
 import sys
+import csv
 from state_machine import StateMachine
 from sensors import Accelerometer
 from buttons import BeginButton, PowerButton
@@ -13,7 +14,8 @@ from config import (
     ACCELEROMETER_I2C_ADDRESS,
     IDLE_LED_PIN,
     MEASURING_LED_PIN,
-    MEASURING_LED_BLINK_INTERVAL
+    MEASURING_LED_BLINK_INTERVAL,
+    CSV_OUTPUT_PATH
 )
 
 
@@ -56,6 +58,8 @@ class MeasurementSystem:
         
         self.running = True
         self.last_reading_time = 0
+        self.readings = []
+        self.csv_output_path = CSV_OUTPUT_PATH
     
     def on_begin_button_pressed(self):
         """Handle BEGIN button press - toggle measurement state."""
@@ -81,7 +85,15 @@ class MeasurementSystem:
         try:
             accel_data = self.accelerometer.read()
             
-            timestamp = time.strftime("%H:%M:%S")
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            self.readings.append(
+                {
+                    "timestamp": timestamp,
+                    "x": accel_data["x"],
+                    "y": accel_data["y"],
+                    "z": accel_data["z"],
+                }
+            )
             print(
                 f"[{timestamp}] Vibration - "
                 f"X={accel_data['x']:+.2f}m/s² "
@@ -126,6 +138,21 @@ class MeasurementSystem:
         
         finally:
             self.cleanup()
+
+    def save_readings_to_csv(self):
+        """Save collected readings to a CSV file after shutdown."""
+        if not self.readings:
+            print("[CSV] No readings to save.")
+            return
+
+        try:
+            with open(self.csv_output_path, "w", newline="") as csv_file:
+                writer = csv.DictWriter(csv_file, fieldnames=["timestamp", "x", "y", "z"])
+                writer.writeheader()
+                writer.writerows(self.readings)
+            print(f"[CSV] Saved {len(self.readings)} readings to {self.csv_output_path}")
+        except Exception as e:
+            print(f"[CSV] Failed to write CSV file: {e}")
     
     def cleanup(self):
         """Clean up GPIO and other resources."""
@@ -136,6 +163,8 @@ class MeasurementSystem:
             print("GPIO cleanup complete.")
         except Exception:
             pass
+
+        self.save_readings_to_csv()
         
         print("=" * 60)
         print("System shutdown complete.")
