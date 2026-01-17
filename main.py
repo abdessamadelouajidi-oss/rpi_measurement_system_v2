@@ -4,7 +4,7 @@ import time
 import sys
 import csv
 from state_machine import StateMachine
-from sensors import Accelerometer
+from sensors import Accelerometer, ToFSensor
 from buttons import BeginButton, PowerButton
 from leds import IdleLED, MeasuringLED
 from config import (
@@ -12,6 +12,8 @@ from config import (
     BEGIN_BUTTON_PIN,
     POWER_BUTTON_PIN,
     ACCELEROMETER_I2C_ADDRESS,
+    TOF_ENABLED,
+    TOF_I2C_ADDRESS,
     IDLE_LED_PIN,
     MEASURING_LED_PIN,
     MEASURING_LED_BLINK_INTERVAL,
@@ -36,6 +38,12 @@ class MeasurementSystem:
         print("Initializing accelerometer...")
         self.accelerometer = Accelerometer(i2c_address=ACCELEROMETER_I2C_ADDRESS)
         print()
+
+        self.tof = None
+        if TOF_ENABLED:
+            print("Initializing VL53L0X ToF sensor...")
+            self.tof = ToFSensor(i2c_address=TOF_I2C_ADDRESS)
+            print()
         
         # Initialize buttons
         print("Initializing buttons...")
@@ -84,6 +92,7 @@ class MeasurementSystem:
         """Read accelerometer and print vibration data."""
         try:
             accel_data = self.accelerometer.read()
+            tof_data = self.tof.read() if self.tof else {"distance_mm": None}
             
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             self.readings.append(
@@ -92,7 +101,13 @@ class MeasurementSystem:
                     "x": accel_data["x"],
                     "y": accel_data["y"],
                     "z": accel_data["z"],
+                    "distance_mm": tof_data["distance_mm"],
                 }
+            )
+            distance_text = (
+                f"{tof_data['distance_mm']:.1f}mm"
+                if tof_data["distance_mm"] is not None
+                else "N/A"
             )
             print(
                 f"[{timestamp}] Vibration - "
@@ -100,6 +115,8 @@ class MeasurementSystem:
                 f"Y={accel_data['y']:+.2f}m/s² "
                 f"Z={accel_data['z']:+.2f}m/s²"
             )
+            if self.tof:
+                print(f"[{timestamp}] Distance - D={distance_text}")
         except Exception as e:
             print(f"[ERROR] Failed to read accelerometer: {e}")
     
@@ -147,7 +164,10 @@ class MeasurementSystem:
 
         try:
             with open(self.csv_output_path, "w", newline="") as csv_file:
-                writer = csv.DictWriter(csv_file, fieldnames=["timestamp", "x", "y", "z"])
+                writer = csv.DictWriter(
+                    csv_file,
+                    fieldnames=["timestamp", "x", "y", "z", "distance_mm"],
+                )
                 writer.writeheader()
                 writer.writerows(self.readings)
             print(f"[CSV] Saved {len(self.readings)} readings to {self.csv_output_path}")

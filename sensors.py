@@ -145,3 +145,51 @@ class Accelerometer(Sensor):
         if raw > 8191:
             raw -= 16384
         return raw
+
+
+class ToFSensor(Sensor):
+    """
+    Time-of-flight distance sensor using Adafruit CircuitPython drivers.
+
+    Supports VL53L0X via adafruit-circuitpython-vl53l0x.
+    """
+
+    def __init__(self, i2c_address=0x29):
+        """Initialize the ToF sensor."""
+        self._device = None
+        self.i2c_address = i2c_address
+
+        try:
+            import board
+            import busio
+            import adafruit_vl53l0x
+
+            i2c = busio.I2C(board.SCL, board.SDA)
+            self._device = adafruit_vl53l0x.VL53L0X(i2c)
+            if self.i2c_address != 0x29:
+                if hasattr(self._device, "set_address"):
+                    self._device.set_address(self.i2c_address)
+                else:
+                    print("[TOF] Warning: driver does not support set_address")
+            print(f"[TOF] Initialized VL53L0X on I2C (0x{self.i2c_address:02X})")
+        except Exception as e:
+            print(f"[TOF] Warning: Could not initialize - {e}")
+            print("[TOF] Using simulated mode")
+            self._device = None
+
+    def read(self):
+        """
+        Read distance in millimeters.
+
+        Returns:
+            dict with 'distance_mm' key
+        """
+        if self._device is None:
+            return {"distance_mm": 0.0}
+
+        try:
+            distance = self._device.range
+            return {"distance_mm": float(distance)}
+        except Exception as e:
+            print(f"[TOF] Read error: {e}")
+            return {"distance_mm": 0.0}

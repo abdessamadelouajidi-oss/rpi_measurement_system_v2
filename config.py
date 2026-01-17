@@ -6,6 +6,8 @@ POWER_BUTTON_PIN = 27      # GPIO 27 for POWER button
 
 # Sensor configuration
 ACCELEROMETER_I2C_ADDRESS = 0x1C  # Default MMA8452 I2C address
+TOF_ENABLED = True  # VL53L0X time-of-flight sensor
+TOF_I2C_ADDRESS = 0x29  # Default VL53L0X address
 
 # LED pins
 IDLE_LED_PIN = 5        # GPIO 5 - lights up when in IDLE state
