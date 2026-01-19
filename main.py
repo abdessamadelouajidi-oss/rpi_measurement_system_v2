@@ -5,7 +5,6 @@ import sys
 import csv
 import os
 import shutil
-import getpass
 from state_machine import StateMachine
 from sensors import Accelerometer, ToFSensor
 from buttons import BeginButton, PowerButton
@@ -23,7 +22,7 @@ from config import (
     CSV_OUTPUT_PATH,
     USB_COPY_LED_PIN,
     USB_COPY_LED_BLINK_INTERVAL,
-    USB_LABEL,
+    USB_COPY_ANY,
     USB_CHECK_INTERVAL,
 )
 
@@ -80,10 +79,9 @@ class MeasurementSystem:
         self.last_reading_time = 0
         self.readings = []
         self.csv_output_path = CSV_OUTPUT_PATH
-        self.usb_label = USB_LABEL
-        self.usb_present = False
+        self.usb_copy_any = USB_COPY_ANY
+        self.usb_seen_mounts = set()
         self.last_usb_check_time = 0
-        self.last_usb_mount = None
     
     def on_begin_button_pressed(self):
         """Handle BEGIN button press - toggle measurement state."""
@@ -136,22 +134,27 @@ class MeasurementSystem:
         except Exception as e:
             print(f"[ERROR] Failed to read accelerometer: {e}")
 
-    def _candidate_usb_paths(self):
-        """Return candidate mount paths for the labeled USB."""
-        user = getpass.getuser()
-        return [
-            os.path.join("/media", user, self.usb_label),
-            os.path.join("/media", "pi", self.usb_label),
-            os.path.join("/media", self.usb_label),
-            os.path.join("/run/media", user, self.usb_label),
-        ]
+    def _scan_usb_mounts(self):
+        """Return all mounted USB paths under /media and /run/media."""
+        if not self.usb_copy_any:
+            return []
 
-    def _find_usb_mount(self):
-        """Find the mount path for the labeled USB, if present."""
-        for path in self._candidate_usb_paths():
-            if os.path.isdir(path):
-                return path
-        return None
+        mounts = set()
+        for base in ("/media", "/run/media"):
+            if not os.path.isdir(base):
+                continue
+            for entry in os.scandir(base):
+                if not entry.is_dir():
+                    continue
+                subdirs = [
+                    sub.path for sub in os.scandir(entry.path)
+                    if sub.is_dir()
+                ]
+                if subdirs:
+                    mounts.update(subdirs)
+                else:
+                    mounts.add(entry.path)
+        return sorted(mounts)
 
     def _build_usb_csv_path(self, mount_path):
         """Build a timestamped CSV path on the USB drive."""
@@ -159,33 +162,40 @@ class MeasurementSystem:
         stamp = time.strftime("%Y%m%d_%H%M%S")
         return os.path.join(mount_path, f"{base}_{stamp}.csv")
 
-    def _copy_csv_to_usb(self, mount_path):
-        """Copy the latest CSV to the USB drive."""
+    def _copy_csv_to_mounts(self, mount_paths):
+        """Copy the latest CSV to one or more USB mount paths."""
         if not self.readings:
             print("[USB] No readings to copy yet.")
             return
 
         self.usb_copy_led.set_copying()
-        try:
-            self.save_readings_to_csv()
-            usb_csv_path = self._build_usb_csv_path(mount_path)
-            shutil.copy2(self.csv_output_path, usb_csv_path)
-            print(f"[USB] Copied CSV to {usb_csv_path}")
+        self.save_readings_to_csv()
+
+        success = False
+        for mount_path in mount_paths:
+            try:
+                usb_csv_path = self._build_usb_csv_path(mount_path)
+                shutil.copy2(self.csv_output_path, usb_csv_path)
+                print(f"[USB] Copied CSV to {usb_csv_path}")
+                success = True
+            except Exception as e:
+                print(f"[USB] Copy failed for {mount_path}: {e}")
+
+        if success:
             self.usb_copy_led.set_copied()
-        except Exception as e:
-            print(f"[USB] Copy failed: {e}")
+        else:
             self.usb_copy_led.set_idle()
 
     def _check_usb_copy(self):
         """Detect USB insertion/removal and copy CSV when inserted."""
-        mount_path = self._find_usb_mount()
-        if mount_path and not self.usb_present:
-            self.usb_present = True
-            self.last_usb_mount = mount_path
-            self._copy_csv_to_usb(mount_path)
-        elif not mount_path and self.usb_present:
-            self.usb_present = False
-            self.last_usb_mount = None
+        mounts = set(self._scan_usb_mounts())
+        new_mounts = mounts - self.usb_seen_mounts
+
+        if new_mounts:
+            self._copy_csv_to_mounts(sorted(new_mounts))
+
+        self.usb_seen_mounts = mounts
+        if not mounts:
             self.usb_copy_led.set_idle()
     
     def run(self):
