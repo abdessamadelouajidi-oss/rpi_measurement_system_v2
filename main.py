@@ -3,10 +3,13 @@
 import time
 import sys
 import csv
+import os
+import shutil
+import getpass
 from state_machine import StateMachine
 from sensors import Accelerometer, ToFSensor
 from buttons import BeginButton, PowerButton
-from leds import IdleLED, MeasuringLED
+from leds import IdleLED, MeasuringLED, CopyLED
 from config import (
     READING_INTERVAL,
     BEGIN_BUTTON_PIN,
@@ -17,7 +20,11 @@ from config import (
     IDLE_LED_PIN,
     MEASURING_LED_PIN,
     MEASURING_LED_BLINK_INTERVAL,
-    CSV_OUTPUT_PATH
+    CSV_OUTPUT_PATH,
+    USB_COPY_LED_PIN,
+    USB_COPY_LED_BLINK_INTERVAL,
+    USB_LABEL,
+    USB_CHECK_INTERVAL,
 )
 
 
@@ -62,12 +69,21 @@ class MeasurementSystem:
             blink_interval=MEASURING_LED_BLINK_INTERVAL
         )
         self.idle_led.turn_on()  # Start with IDLE LED on
+        self.usb_copy_led = CopyLED(
+            pin=USB_COPY_LED_PIN,
+            blink_interval=USB_COPY_LED_BLINK_INTERVAL
+        )
+        self.usb_copy_led.set_idle()
         print()
         
         self.running = True
         self.last_reading_time = 0
         self.readings = []
         self.csv_output_path = CSV_OUTPUT_PATH
+        self.usb_label = USB_LABEL
+        self.usb_present = False
+        self.last_usb_check_time = 0
+        self.last_usb_mount = None
     
     def on_begin_button_pressed(self):
         """Handle BEGIN button press - toggle measurement state."""
@@ -119,6 +135,58 @@ class MeasurementSystem:
                 print(f"[{timestamp}] Distance - D={distance_text}")
         except Exception as e:
             print(f"[ERROR] Failed to read accelerometer: {e}")
+
+    def _candidate_usb_paths(self):
+        """Return candidate mount paths for the labeled USB."""
+        user = getpass.getuser()
+        return [
+            os.path.join("/media", user, self.usb_label),
+            os.path.join("/media", "pi", self.usb_label),
+            os.path.join("/media", self.usb_label),
+            os.path.join("/run/media", user, self.usb_label),
+        ]
+
+    def _find_usb_mount(self):
+        """Find the mount path for the labeled USB, if present."""
+        for path in self._candidate_usb_paths():
+            if os.path.isdir(path):
+                return path
+        return None
+
+    def _build_usb_csv_path(self, mount_path):
+        """Build a timestamped CSV path on the USB drive."""
+        base = os.path.splitext(os.path.basename(self.csv_output_path))[0]
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        return os.path.join(mount_path, f"{base}_{stamp}.csv")
+
+    def _copy_csv_to_usb(self, mount_path):
+        """Copy the latest CSV to the USB drive."""
+        if not self.readings:
+            print("[USB] No readings to copy yet.")
+            return
+
+        self.usb_copy_led.set_copying()
+        try:
+            self.save_readings_to_csv()
+            usb_csv_path = self._build_usb_csv_path(mount_path)
+            shutil.copy2(self.csv_output_path, usb_csv_path)
+            print(f"[USB] Copied CSV to {usb_csv_path}")
+            self.usb_copy_led.set_copied()
+        except Exception as e:
+            print(f"[USB] Copy failed: {e}")
+            self.usb_copy_led.set_idle()
+
+    def _check_usb_copy(self):
+        """Detect USB insertion/removal and copy CSV when inserted."""
+        mount_path = self._find_usb_mount()
+        if mount_path and not self.usb_present:
+            self.usb_present = True
+            self.last_usb_mount = mount_path
+            self._copy_csv_to_usb(mount_path)
+        elif not mount_path and self.usb_present:
+            self.usb_present = False
+            self.last_usb_mount = None
+            self.usb_copy_led.set_idle()
     
     def run(self):
         """Main application loop."""
@@ -136,6 +204,7 @@ class MeasurementSystem:
                 # Update LEDs based on state
                 if self.state_machine.is_measuring():
                     self.measuring_led.update()  # Blink the measuring LED
+                self.usb_copy_led.update()
                 
                 # Read accelerometer if measuring
                 current_time = time.time()
@@ -145,6 +214,10 @@ class MeasurementSystem:
                 ):
                     self.read_vibration()
                     self.last_reading_time = current_time
+
+                if current_time - self.last_usb_check_time >= USB_CHECK_INTERVAL:
+                    self.last_usb_check_time = current_time
+                    self._check_usb_copy()
                 
                 # Small sleep to avoid busy-waiting
                 time.sleep(0.05)

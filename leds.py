@@ -98,3 +98,49 @@ class MeasuringLED(LED):
             else:
                 self.turn_on()
             self.last_blink_time = current_time
+
+
+class CopyLED(LED):
+    """
+    USB copy status LED.
+
+    Blinks while copying and stays solid when a copy succeeds.
+    """
+
+    def __init__(self, pin=13, name="USB_COPY_LED", blink_interval=0.2):
+        """Initialize the USB copy status LED."""
+        super().__init__(pin, name)
+        self.blink_interval = blink_interval
+        self.last_blink_time = 0
+        self.mode = "off"  # off | blinking | on
+
+    def set_copying(self):
+        """Set LED to blinking mode."""
+        self.mode = "blinking"
+
+    def set_copied(self):
+        """Set LED to solid on."""
+        self.mode = "on"
+        self.turn_on()
+
+    def set_idle(self):
+        """Turn LED off."""
+        self.mode = "off"
+        self.turn_off()
+
+    def update(self):
+        """Update LED state based on current mode."""
+        if self.mode == "blinking":
+            current_time = time.time()
+            if current_time - self.last_blink_time >= self.blink_interval:
+                if self.is_on:
+                    self.turn_off()
+                else:
+                    self.turn_on()
+                self.last_blink_time = current_time
+        elif self.mode == "on":
+            if not self.is_on:
+                self.turn_on()
+        else:
+            if self.is_on:
+                self.turn_off()
